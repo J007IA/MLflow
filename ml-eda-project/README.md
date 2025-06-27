@@ -76,11 +76,9 @@ Construir un pipeline de Machine Learning que prediga la **fuga de clientes (chu
 #### 🧹 Preprocesamiento
 - Imputación de nulos.
 - Encoding de variables categóricas.
-- Escalado de variables numéricas.
-
 
 #### 🤖 Modelos
-- Prueba con modelos base: Logistic Regression, Random Forest, XGBoost.
+- Prueba con modelos base: Random Forest.
 - Validación cruzada.
 - Métricas: AUC, Recall, Precision, F1-score.
 
@@ -100,11 +98,6 @@ Construir un pipeline de Machine Learning que prediga la **fuga de clientes (chu
 - **Entrenamiento:** activado por cambios en `develop` o por programación.
 - **Inferencia batch:** lectura periódica de nuevos datos para scoring.
 - **Inferencia online:** API para predicciones en tiempo real (opcional).
-
-
-#### 🧠 Monitoreo (opcional avanzado)
-- **Concept drift:** comparación entre distribución de features train vs OOT.
-- **Data drift:** alertas por cambios fuertes en las variables.
 
 ---
 
