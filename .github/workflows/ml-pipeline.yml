@@ -1,0 +1,141 @@
+name: ML Pipeline - Data Processing and Model Training
+
+on:
+  push:
+    branches: [ main, feature/add-actions ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  ml-pipeline:
+    runs-on: ubuntu-latest
+    
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Verify AWS credentials
+      run: |
+        echo "Verifying AWS credentials are set..."
+        if [ -z "$AWS_ACCESS_KEY_ID" ]; then
+          echo "❌ AWS_ACCESS_KEY_ID is not set"
+          exit 1
+        fi
+        if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+          echo "❌ AWS_SECRET_ACCESS_KEY is not set"
+          exit 1
+        fi
+        if [ -z "$AWS_DEFAULT_REGION" ]; then
+          echo "❌ AWS_DEFAULT_REGION is not set"
+          exit 1
+        fi
+        echo "✅ All AWS credentials are configured"
+        
+    - name: Create necessary directories
+      run: |
+        mkdir -p data/pre-processed
+        mkdir -p data/processed
+        mkdir -p artifacts
+        
+    - name: Check data availability
+      run: |
+        echo "Checking for input data files..."
+        if [ ! -f "exploration-part/data/raw/train_clientes_sample.csv" ]; then
+          echo "❌ train_clientes_sample.csv not found in exploration-part/data/raw/"
+          ls -la exploration-part/data/raw/ || echo "exploration-part/data/raw/ directory not found"
+          exit 1
+        fi
+        if [ ! -f "exploration-part/data/raw/train_requerimientos_sample.csv" ]; then
+          echo "❌ train_requerimientos_sample.csv not found in exploration-part/data/raw/"
+          ls -la exploration-part/data/raw/ || echo "exploration-part/data/raw/ directory not found"
+          exit 1
+        fi
+        echo "✅ All required input data files are present"
+        
+    - name: Run data preprocessing
+      run: |
+        echo "Starting data preprocessing..."
+        cd src
+        python train-pre-process.py
+        echo "✅ Data preprocessing completed"
+        
+    - name: Verify preprocessing output
+      run: |
+        echo "Verifying preprocessing output..."
+        if [ ! -f "exploration-part/data/pre-processed/train_clientes_features.csv" ]; then
+          echo "❌ Preprocessing output file not found"
+          ls -la exploration-part/data/pre-processed/ || echo "exploration-part/data/pre-processed/ directory not found"
+          exit 1
+        fi
+        echo "✅ Preprocessing output verified"
+        wc -l exploration-part/data/pre-processed/train_clientes_features.csv
+        
+    - name: Run model training with MLflow
+      run: |
+        echo "Starting model training..."
+        cd src
+        python model_training.py
+        echo "✅ Model training completed"
+        
+    - name: Upload artifacts
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: ml-pipeline-outputs
+        path: |
+          exploration-part/data/pre-processed/
+          artifacts/
+          *.csv
+          *.txt
+        retention-days: 30
+        
+    - name: Generate pipeline summary
+      if: always()
+      run: |
+        echo "## ML Pipeline Execution Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Files Generated:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Preprocessed Data**: \`exploration-part/data/pre-processed/train_clientes_features.csv\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Model Artifacts**: Stored in MLflow S3 bucket" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Data Statistics:" >> $GITHUB_STEP_SUMMARY
+        if [ -f "exploration-part/data/pre-processed/train_clientes_features.csv" ]; then
+          echo "- **Preprocessed Records**: $(tail -n +2 exploration-part/data/pre-processed/train_clientes_features.csv | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Features Count**: $(head -n 1 exploration-part/data/pre-processed/train_clientes_features.csv | tr ',' '\n' | wc -l)" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### MLflow Experiment:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Experiment Name**: Customer_Churn_Production" >> $GITHUB_STEP_SUMMARY
+        echo "- **Tracking Server**: SageMaker MLflow Server" >> $GITHUB_STEP_SUMMARY
+        echo "- **Artifacts Location**: s3://myawsbucket.3.2025/artifacts/" >> $GITHUB_STEP_SUMMARY
+        
+    - name: Cleanup temporary files
+      if: always()
+      run: |
+        echo "Cleaning up temporary files..."
+        rm -f *.txt *.csv *.pkl 2>/dev/null || true
+        echo "✅ Cleanup completed" 

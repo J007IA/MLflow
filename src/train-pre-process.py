@@ -1,8 +1,8 @@
 import pandas as pd
 
 # --- Cargar datos ---
-clientes = pd.read_csv('../data/raw/train_clientes_sample.csv')
-requerimientos = pd.read_csv('../data/raw/train_requerimientos_sample.csv')
+clientes = pd.read_csv('../exploration-part/data/raw/train_clientes_sample.csv')
+requerimientos = pd.read_csv('../exploration-part/data/raw/train_requerimientos_sample.csv')
 
 # --- Agregar info de requerimientos por cliente ---
 # 1. Total requerimientos por cliente (últimos 6 meses)
@@ -44,4 +44,4 @@ df_final = clientes.merge(req_agg, on='ID_CORRELATIVO', how='left').fillna({
 print(df_final.head())
 
 # --- Exportar a CSV ---
-df_final.to_csv('../data/pre-processed/train_clientes_features.csv', index=False)
+df_final.to_csv('../exploration-part/data/pre-processed/train_clientes_features.csv', index=False)
