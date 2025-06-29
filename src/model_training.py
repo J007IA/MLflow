@@ -225,15 +225,32 @@ def train_model_with_mlflow(X, y):
         mlflow.log_artifact("feature_importance.csv")
         os.remove("feature_importance.csv")  # Clean up
         
-        # Skip model logging to avoid registry issues with SageMaker tracking server
+        # Save model as artifact for FastAPI deployment
+        import joblib
+        model_filename = "churn_model.joblib"
+        joblib.dump(model, model_filename)
+        mlflow.log_artifact(model_filename)
+        os.remove(model_filename)  # Clean up local file
+        
+        # Save feature names for API
+        import json
+        feature_names_file = "feature_names.json"
+        with open(feature_names_file, "w") as f:
+            json.dump(list(X.columns), f)
+        mlflow.log_artifact(feature_names_file)
+        os.remove(feature_names_file)  # Clean up
+        
         print("\n✓ Experiment logged successfully to MLflow")
         print("  - Metrics, parameters, and artifacts saved")
-        print("  - Model logging skipped (SageMaker tracking server limitation)")
+        print("  - Model saved as joblib artifact for deployment")
+        print("  - Feature names saved for API preprocessing")
         
         # Log additional metadata
         mlflow.log_param("data_source", "train_clientes_features.csv")
         mlflow.log_param("preprocessing_steps", "label_encoding, smote_oversampling")
         mlflow.log_param("artifact_location", "s3://myawsbucket.3.2025/artifacts/")
+        mlflow.log_param("model_format", "joblib")
+        mlflow.log_param("deployment_ready", True)
         
         return model, {
             'auc': auc,
