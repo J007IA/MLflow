@@ -135,7 +135,11 @@ jobs:
       id: git_info
       run: |
         echo "COMMIT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-        echo "BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
+        # Sanitize branch name for Docker tag (replace invalid characters)
+        BRANCH_RAW=$(git rev-parse --abbrev-ref HEAD)
+        BRANCH_CLEAN=$(echo "$BRANCH_RAW" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]')
+        echo "BRANCH_NAME=$BRANCH_CLEAN" >> $GITHUB_ENV
+        echo "BRANCH_NAME_RAW=$BRANCH_RAW" >> $GITHUB_ENV
         echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
         
     - name: Build Docker image
@@ -173,7 +177,7 @@ jobs:
         # Customer Churn Prediction Model Deployment Manifest
         # Generated on: ${{ env.BUILD_DATE }}
         # Git Commit: ${{ env.COMMIT_SHA }}
-        # Branch: ${{ env.BRANCH_NAME }}
+        # Branch: ${{ env.BRANCH_NAME_RAW }} (sanitized: ${{ env.BRANCH_NAME }})
         
         apiVersion: apps/v1
         kind: Deployment
@@ -241,7 +245,8 @@ jobs:
           "deployment_id": "${{ github.run_id }}",
           "image_uri": "${{ env.IMAGE_URI }}",
           "git_commit": "${{ env.COMMIT_SHA }}",
-          "branch": "${{ env.BRANCH_NAME }}",
+          "branch_original": "${{ env.BRANCH_NAME_RAW }}",
+          "branch_sanitized": "${{ env.BRANCH_NAME }}",
           "build_date": "${{ env.BUILD_DATE }}",
           "ecr_repository": "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}",
           "tags": [
@@ -308,6 +313,7 @@ jobs:
         echo "- **Kubernetes Manifest**: \`deployment-manifest.yaml\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Deployment Info**: \`deployment-info.json\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Git Commit**: \`${{ env.COMMIT_SHA }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch**: \`${{ env.BRANCH_NAME_RAW }}\` (Docker tag: \`${{ env.BRANCH_NAME }}\`)" >> $GITHUB_STEP_SUMMARY
         echo "- **Build Date**: \`${{ env.BUILD_DATE }}\`" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 🚀 Next Steps:" >> $GITHUB_STEP_SUMMARY
