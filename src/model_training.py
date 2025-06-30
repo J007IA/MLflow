@@ -32,7 +32,7 @@ def setup_aws_credentials():
 def setup_mlflow_s3():
     """Configure MLflow to use SageMaker tracking server with S3 for artifact storage"""
     # Use SageMaker MLflow tracking server
-    mlflow.set_tracking_uri("arn:aws:sagemaker:us-west-1:880138931512:mlflow-tracking-server/demodata")
+    mlflow.set_tracking_uri("https://1260-34-16-138-241.ngrok-free.app")
     
     # Set S3 as default artifact root
     os.environ['MLFLOW_DEFAULT_ARTIFACT_ROOT'] = 's3://myawsbucket.3.2025/artifacts/'
