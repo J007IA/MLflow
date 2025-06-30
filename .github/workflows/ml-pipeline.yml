@@ -425,11 +425,7 @@ jobs:
             --function-name $FUNCTION_NAME \
             --timeout 30 \
             --memory-size 1024 \
-            --environment Variables='{
-              "AWS_DEFAULT_REGION":"${{ secrets.AWS_DEFAULT_REGION }}",
-              "MLFLOW_TRACKING_URI":"${{ secrets.MLFLOW_TRACKING_URI }}",
-              "MODEL_STAGE":"Production"
-            }'
+            --environment Variables='{"AWS_DEFAULT_REGION":"${{ secrets.AWS_DEFAULT_REGION }}","MLFLOW_TRACKING_URI":"${{ secrets.MLFLOW_TRACKING_URI }}","MODEL_STAGE":"Production"}'
             
           echo "✅ Lambda function updated successfully"
         else
@@ -445,11 +441,7 @@ jobs:
             --package-type Image \
             --timeout 30 \
             --memory-size 1024 \
-            --environment Variables='{
-              "AWS_DEFAULT_REGION":"${{ secrets.AWS_DEFAULT_REGION }}",
-              "MLFLOW_TRACKING_URI":"${{ secrets.MLFLOW_TRACKING_URI }}",
-              "MODEL_STAGE":"Production"
-            }' \
+            --environment Variables='{"AWS_DEFAULT_REGION":"${{ secrets.AWS_DEFAULT_REGION }}","MLFLOW_TRACKING_URI":"${{ secrets.MLFLOW_TRACKING_URI }}","MODEL_STAGE":"Production"}' \
             --description "Customer Churn Prediction API using MLflow model"
             
           echo "✅ Lambda function created successfully"
