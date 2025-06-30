@@ -75,6 +75,17 @@ def load_and_preprocess_data():
         print("✗ train_clientes_features.csv not found. Please ensure the preprocessing script has run successfully.")
         raise
     
+    # Check for missing values before preprocessing
+    missing_counts = data.isnull().sum()
+    total_missing = missing_counts.sum()
+    print(f"✓ Total missing values found: {total_missing}")
+    
+    if total_missing > 0:
+        print("Missing values by column:")
+        missing_columns = missing_counts[missing_counts > 0]
+        for col, count in missing_columns.items():
+            print(f"  - {col}: {count} ({count/len(data)*100:.2f}%)")
+    
     # Drop non-predictive columns
     cols_to_drop = ['ID_CORRELATIVO', 'CODMES']
     existing_cols_to_drop = [col for col in cols_to_drop if col in data.columns]
@@ -99,12 +110,70 @@ def load_and_preprocess_data():
                             (data['PORC_RECLAMOS'] > 0.5)).astype(int)
         print("✓ Created ATTRITION target variable based on business rules")
     
-    # Separate features and target
+    # Handle missing values
+    print("Handling missing values...")
+    
+    # Separate features and target before handling missing values
     X = data.drop(columns=['ATTRITION'])
     y = data['ATTRITION']
     
-    print(f"✓ Features shape: {X.shape}")
+    # Check for missing values in features
+    missing_before = X.isnull().sum().sum()
+    print(f"Missing values in features before cleaning: {missing_before}")
+    
+    if missing_before > 0:
+        # Strategy 1: For columns with >50% missing values, drop them
+        high_missing_cols = []
+        for col in X.columns:
+            missing_pct = X[col].isnull().sum() / len(X)
+            if missing_pct > 0.5:
+                high_missing_cols.append(col)
+        
+        if high_missing_cols:
+            X = X.drop(columns=high_missing_cols)
+            print(f"✓ Dropped {len(high_missing_cols)} columns with >50% missing values: {high_missing_cols}")
+        
+        # Strategy 2: For remaining columns, fill missing values based on data type
+        from sklearn.impute import SimpleImputer
+        
+        # Separate numeric and categorical columns
+        numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+        categorical_cols = X.select_dtypes(include=['object']).columns.tolist()
+        
+        # Impute numeric columns with median
+        if numeric_cols:
+            numeric_imputer = SimpleImputer(strategy='median')
+            X[numeric_cols] = numeric_imputer.fit_transform(X[numeric_cols])
+            print(f"✓ Imputed {len(numeric_cols)} numeric columns with median values")
+        
+        # Impute categorical columns with most frequent value
+        if categorical_cols:
+            categorical_imputer = SimpleImputer(strategy='most_frequent')
+            X[categorical_cols] = categorical_imputer.fit_transform(X[categorical_cols])
+            print(f"✓ Imputed {len(categorical_cols)} categorical columns with most frequent values")
+        
+        # Verify no missing values remain
+        missing_after = X.isnull().sum().sum()
+        print(f"Missing values after cleaning: {missing_after}")
+        
+        if missing_after > 0:
+            print("⚠ Warning: Some missing values still remain. Dropping rows with any missing values...")
+            initial_shape = X.shape[0]
+            # Keep only rows where both X and y have no missing values
+            mask = ~(X.isnull().any(axis=1) | y.isnull())
+            X = X[mask]
+            y = y[mask]
+            final_shape = X.shape[0]
+            dropped_rows = initial_shape - final_shape
+            print(f"✓ Dropped {dropped_rows} rows with missing values ({dropped_rows/initial_shape*100:.2f}%)")
+    
+    print(f"✓ Final dataset shape: {X.shape}")
     print(f"✓ Target distribution: {y.value_counts().to_dict()}")
+    
+    # Final verification
+    assert X.isnull().sum().sum() == 0, "Error: Missing values still present in features!"
+    assert y.isnull().sum() == 0, "Error: Missing values still present in target!"
+    print("✓ Data preprocessing completed successfully - no missing values remain")
     
     return X, y
 

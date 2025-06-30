@@ -271,6 +271,7 @@ jobs:
           artifacts/
           deployment-manifest.yaml
           deployment-info.json
+          lambda-deployment-info.json
           *.csv
           *.txt
         retention-days: 30
@@ -309,27 +310,344 @@ jobs:
           echo "- **Status**: ❌ Docker build failed" >> $GITHUB_STEP_SUMMARY
         fi
         echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### ⚡ Lambda Deployment:" >> $GITHUB_STEP_SUMMARY
+        if [ -n "${{ env.LAMBDA_FUNCTION_ARN }}" ]; then
+          echo "- **Function Name**: \`${{ env.LAMBDA_FUNCTION_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Function ARN**: \`${{ env.LAMBDA_FUNCTION_ARN }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **API Gateway**: \`${{ env.API_GATEWAY_ID }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **API Endpoint**: [\`${{ env.API_ENDPOINT }}\`](${{ env.API_ENDPOINT }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **Memory**: 1024 MB" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timeout**: 30 seconds" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package Type**: Container Image" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- **Status**: ❌ Lambda deployment failed or not completed" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📝 Deployment Artifacts:" >> $GITHUB_STEP_SUMMARY
         echo "- **Kubernetes Manifest**: \`deployment-manifest.yaml\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Deployment Info**: \`deployment-info.json\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Lambda Deployment Info**: \`lambda-deployment-info.json\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Git Commit**: \`${{ env.COMMIT_SHA }}\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Branch**: \`${{ env.BRANCH_NAME_RAW }}\` (Docker tag: \`${{ env.BRANCH_NAME }}\`)" >> $GITHUB_STEP_SUMMARY
         echo "- **Build Date**: \`${{ env.BUILD_DATE }}\`" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 🚀 Next Steps:" >> $GITHUB_STEP_SUMMARY
-        if [ -n "${{ env.IMAGE_URI }}" ]; then
+        if [ -n "${{ env.API_ENDPOINT }}" ]; then
+          echo "#### Lambda API is Ready! 🎉" >> $GITHUB_STEP_SUMMARY
+          echo "1. **Test the API**: Use the endpoints below" >> $GITHUB_STEP_SUMMARY
+          echo "   - Health Check: [\`GET ${{ env.API_ENDPOINT }}/health\`](${{ env.API_ENDPOINT }}/health)" >> $GITHUB_STEP_SUMMARY
+          echo "   - Make Predictions: \`POST ${{ env.API_ENDPOINT }}/predict\`" >> $GITHUB_STEP_SUMMARY
+          echo "2. **Sample curl commands**:" >> $GITHUB_STEP_SUMMARY
+          echo "   \`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "   # Health check" >> $GITHUB_STEP_SUMMARY
+          echo "   curl ${{ env.API_ENDPOINT }}/health" >> $GITHUB_STEP_SUMMARY
+          echo "   " >> $GITHUB_STEP_SUMMARY
+          echo "   # Make prediction" >> $GITHUB_STEP_SUMMARY
+          echo "   curl -X POST ${{ env.API_ENDPOINT }}/predict \\" >> $GITHUB_STEP_SUMMARY
+          echo "     -H \"Content-Type: application/json\" \\" >> $GITHUB_STEP_SUMMARY
+          echo "     -d '{\"features\": {\"AMT_INCOME_TOTAL\": 202500, ...}}'" >> $GITHUB_STEP_SUMMARY
+          echo "   \`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. **Monitor**: Check Lambda logs in CloudWatch" >> $GITHUB_STEP_SUMMARY
+          echo "4. **Scale**: Lambda auto-scales, but you can adjust memory/timeout if needed" >> $GITHUB_STEP_SUMMARY
+          echo "5. **Optional**: Deploy to EKS/ECS using the Kubernetes manifest for container orchestration" >> $GITHUB_STEP_SUMMARY
+        elif [ -n "${{ env.IMAGE_URI }}" ]; then
           echo "1. **Deploy to EKS/ECS**: Use the Kubernetes manifest or deploy directly to ECS" >> $GITHUB_STEP_SUMMARY
-          echo "2. **Test API**: Access health check at \`/health\` and predictions at \`/predict\`" >> $GITHUB_STEP_SUMMARY
-          echo "3. **Scale**: Adjust replicas in the deployment manifest as needed" >> $GITHUB_STEP_SUMMARY
-          echo "4. **Monitor**: Set up monitoring for the deployed API" >> $GITHUB_STEP_SUMMARY
+          echo "2. **Deploy Lambda**: Docker image is ready, but Lambda deployment may have failed" >> $GITHUB_STEP_SUMMARY
+          echo "3. **Test API**: Access health check at \`/health\` and predictions at \`/predict\`" >> $GITHUB_STEP_SUMMARY
+          echo "4. **Scale**: Adjust replicas in the deployment manifest as needed" >> $GITHUB_STEP_SUMMARY
+          echo "5. **Monitor**: Set up monitoring for the deployed API" >> $GITHUB_STEP_SUMMARY
         else
           echo "1. **Fix Issues**: Check logs and resolve build/deployment issues" >> $GITHUB_STEP_SUMMARY
           echo "2. **Retry**: Re-run the pipeline after fixes" >> $GITHUB_STEP_SUMMARY
         fi
         
+    - name: Create Lambda execution role
+      run: |
+        echo "Creating Lambda execution role..."
+        
+        # Check if role already exists
+        if aws iam get-role --role-name ChurnPredictionLambdaRole >/dev/null 2>&1; then
+          echo "✅ Lambda role already exists"
+        else
+          # Create trust policy for Lambda
+          cat > lambda-trust-policy.json << EOF
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        }
+        EOF
+        
+          # Create the role
+          aws iam create-role \
+            --role-name ChurnPredictionLambdaRole \
+            --assume-role-policy-document file://lambda-trust-policy.json
+            
+          # Attach basic Lambda execution policy
+          aws iam attach-role-policy \
+            --role-name ChurnPredictionLambdaRole \
+            --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+            
+          # Attach ECR access policy
+          aws iam attach-role-policy \
+            --role-name ChurnPredictionLambdaRole \
+            --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+            
+          echo "✅ Lambda role created successfully"
+        fi
+        
+        # Get role ARN
+        LAMBDA_ROLE_ARN=$(aws iam get-role --role-name ChurnPredictionLambdaRole --query 'Role.Arn' --output text)
+        echo "LAMBDA_ROLE_ARN=$LAMBDA_ROLE_ARN" >> $GITHUB_ENV
+        
+    - name: Deploy Lambda function
+      run: |
+        echo "Deploying Lambda function..."
+        
+        FUNCTION_NAME="churn-prediction-api"
+        
+        # Check if function already exists
+        if aws lambda get-function --function-name $FUNCTION_NAME >/dev/null 2>&1; then
+          echo "Updating existing Lambda function..."
+          aws lambda update-function-code \
+            --function-name $FUNCTION_NAME \
+            --image-uri ${{ env.IMAGE_URI }}
+            
+          # Update function configuration
+          aws lambda update-function-configuration \
+            --function-name $FUNCTION_NAME \
+            --timeout 30 \
+            --memory-size 1024 \
+            --environment Variables='{
+              "AWS_DEFAULT_REGION":"${{ secrets.AWS_DEFAULT_REGION }}",
+              "MLFLOW_TRACKING_URI":"${{ secrets.MLFLOW_TRACKING_URI }}",
+              "MODEL_STAGE":"Production"
+            }'
+            
+          echo "✅ Lambda function updated successfully"
+        else
+          echo "Creating new Lambda function..."
+          
+          # Wait a bit for the role to be available
+          sleep 10
+          
+          aws lambda create-function \
+            --function-name $FUNCTION_NAME \
+            --role ${{ env.LAMBDA_ROLE_ARN }} \
+            --code ImageUri=${{ env.IMAGE_URI }} \
+            --package-type Image \
+            --timeout 30 \
+            --memory-size 1024 \
+            --environment Variables='{
+              "AWS_DEFAULT_REGION":"${{ secrets.AWS_DEFAULT_REGION }}",
+              "MLFLOW_TRACKING_URI":"${{ secrets.MLFLOW_TRACKING_URI }}",
+              "MODEL_STAGE":"Production"
+            }' \
+            --description "Customer Churn Prediction API using MLflow model"
+            
+          echo "✅ Lambda function created successfully"
+        fi
+        
+        # Get function ARN
+        LAMBDA_FUNCTION_ARN=$(aws lambda get-function --function-name $FUNCTION_NAME --query 'Configuration.FunctionArn' --output text)
+        echo "LAMBDA_FUNCTION_ARN=$LAMBDA_FUNCTION_ARN" >> $GITHUB_ENV
+        echo "LAMBDA_FUNCTION_NAME=$FUNCTION_NAME" >> $GITHUB_ENV
+        
+    - name: Create API Gateway
+      run: |
+        echo "Setting up API Gateway for Lambda..."
+        
+        API_NAME="churn-prediction-api"
+        
+        # Check if API already exists
+        API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='$API_NAME'].ApiId" --output text)
+        
+        if [ "$API_ID" != "None" ] && [ ! -z "$API_ID" ]; then
+          echo "✅ API Gateway already exists with ID: $API_ID"
+        else
+          echo "Creating new API Gateway..."
+          
+          # Create HTTP API
+          API_RESULT=$(aws apigatewayv2 create-api \
+            --name $API_NAME \
+            --protocol-type HTTP \
+            --description "Customer Churn Prediction API" \
+            --cors-configuration AllowCredentials=false,AllowHeaders="Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",AllowMethods="GET,POST,OPTIONS",AllowOrigins="*")
+            
+          API_ID=$(echo $API_RESULT | jq -r '.ApiId')
+          echo "✅ API Gateway created with ID: $API_ID"
+        fi
+        
+        echo "API_GATEWAY_ID=$API_ID" >> $GITHUB_ENV
+        
+        # Create Lambda integration
+        INTEGRATION_RESULT=$(aws apigatewayv2 create-integration \
+          --api-id $API_ID \
+          --integration-type AWS_PROXY \
+          --integration-uri ${{ env.LAMBDA_FUNCTION_ARN }} \
+          --payload-format-version "2.0")
+          
+        INTEGRATION_ID=$(echo $INTEGRATION_RESULT | jq -r '.IntegrationId')
+        echo "INTEGRATION_ID=$INTEGRATION_ID" >> $GITHUB_ENV
+        
+        # Create routes
+        aws apigatewayv2 create-route \
+          --api-id $API_ID \
+          --route-key "GET /health" \
+          --target integrations/$INTEGRATION_ID
+          
+        aws apigatewayv2 create-route \
+          --api-id $API_ID \
+          --route-key "POST /predict" \
+          --target integrations/$INTEGRATION_ID
+          
+        aws apigatewayv2 create-route \
+          --api-id $API_ID \
+          --route-key "GET /" \
+          --target integrations/$INTEGRATION_ID
+          
+        # Create deployment and stage
+        DEPLOYMENT_RESULT=$(aws apigatewayv2 create-deployment --api-id $API_ID)
+        DEPLOYMENT_ID=$(echo $DEPLOYMENT_RESULT | jq -r '.DeploymentId')
+        
+        # Create or update stage
+        if aws apigatewayv2 get-stage --api-id $API_ID --stage-name prod >/dev/null 2>&1; then
+          aws apigatewayv2 update-stage \
+            --api-id $API_ID \
+            --stage-name prod \
+            --deployment-id $DEPLOYMENT_ID
+        else
+          aws apigatewayv2 create-stage \
+            --api-id $API_ID \
+            --stage-name prod \
+            --deployment-id $DEPLOYMENT_ID \
+            --auto-deploy
+        fi
+        
+        # Get the API endpoint
+        API_ENDPOINT="https://${API_ID}.execute-api.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/prod"
+        echo "API_ENDPOINT=$API_ENDPOINT" >> $GITHUB_ENV
+        
+        echo "✅ API Gateway configured successfully"
+        echo "API Endpoint: $API_ENDPOINT"
+        
+    - name: Configure Lambda permissions for API Gateway
+      run: |
+        echo "Configuring Lambda permissions for API Gateway..."
+        
+        # Add permission for API Gateway to invoke Lambda
+        aws lambda add-permission \
+          --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+          --statement-id api-gateway-invoke \
+          --action lambda:InvokeFunction \
+          --principal apigateway.amazonaws.com \
+          --source-arn "arn:aws:execute-api:${{ secrets.AWS_DEFAULT_REGION }}:*:${{ env.API_GATEWAY_ID }}/*" \
+          2>/dev/null || echo "Permission already exists"
+          
+        echo "✅ Lambda permissions configured"
+        
+    - name: Test Lambda deployment
+      run: |
+        echo "Testing Lambda deployment..."
+        
+        # Wait for deployment to be ready
+        sleep 30
+        
+        # Test health endpoint
+        echo "Testing health endpoint..."
+        HEALTH_RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/health_response.json "${{ env.API_ENDPOINT }}/health")
+        
+        if [ "$HEALTH_RESPONSE" = "200" ]; then
+          echo "✅ Health check passed"
+          cat /tmp/health_response.json
+        else
+          echo "⚠️ Health check returned status: $HEALTH_RESPONSE"
+          cat /tmp/health_response.json || echo "No response body"
+        fi
+        
+        # Test prediction endpoint with sample data
+        echo "Testing prediction endpoint..."
+        PREDICTION_RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/prediction_response.json \
+          -X POST "${{ env.API_ENDPOINT }}/predict" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "features": {
+              "AMT_INCOME_TOTAL": 202500,
+              "AMT_CREDIT": 406597.5,
+              "AMT_ANNUITY": 24700.5,
+              "AMT_GOODS_PRICE": 351000,
+              "DAYS_BIRTH": -9461,
+              "DAYS_EMPLOYED": -637,
+              "REGION_POPULATION_RELATIVE": 0.018801,
+              "DAYS_ID_PUBLISH": -2120,
+              "OWN_CAR_AGE": 12,
+              "FLAG_MOBIL": 1,
+              "FLAG_EMP_PHONE": 1,
+              "FLAG_WORK_PHONE": 0,
+              "FLAG_CONT_MOBILE": 1,
+              "FLAG_PHONE": 1,
+              "FLAG_EMAIL": 0,
+              "CNT_FAM_MEMBERS": 2,
+              "REGION_RATING_CLIENT": 2,
+              "REGION_RATING_CLIENT_W_CITY": 2,
+              "HOUR_APPR_PROCESS_START": 10,
+              "REG_REGION_NOT_LIVE_REGION": 0,
+              "REG_REGION_NOT_WORK_REGION": 0,
+              "LIVE_REGION_NOT_WORK_REGION": 0,
+              "REG_CITY_NOT_LIVE_CITY": 0,
+              "REG_CITY_NOT_WORK_CITY": 0,
+              "LIVE_CITY_NOT_WORK_CITY": 0
+            }
+          }')
+        
+        if [ "$PREDICTION_RESPONSE" = "200" ]; then
+          echo "✅ Prediction test passed"
+          cat /tmp/prediction_response.json
+        else
+          echo "⚠️ Prediction test returned status: $PREDICTION_RESPONSE"
+          cat /tmp/prediction_response.json || echo "No response body"
+        fi
+        
+    - name: Update deployment artifacts with Lambda info
+      run: |
+        # Update deployment info with Lambda details
+        cat > lambda-deployment-info.json << EOF
+        {
+          "deployment_id": "${{ github.run_id }}",
+          "lambda_function_arn": "${{ env.LAMBDA_FUNCTION_ARN }}",
+          "lambda_function_name": "${{ env.LAMBDA_FUNCTION_NAME }}",
+          "api_gateway_id": "${{ env.API_GATEWAY_ID }}",
+          "api_endpoint": "${{ env.API_ENDPOINT }}",
+          "lambda_role_arn": "${{ env.LAMBDA_ROLE_ARN }}",
+          "image_uri": "${{ env.IMAGE_URI }}",
+          "git_commit": "${{ env.COMMIT_SHA }}",
+          "branch": "${{ env.BRANCH_NAME_RAW }}",
+          "build_date": "${{ env.BUILD_DATE }}",
+          "endpoints": {
+            "health": "${{ env.API_ENDPOINT }}/health",
+            "predict": "${{ env.API_ENDPOINT }}/predict",
+            "root": "${{ env.API_ENDPOINT }}/"
+          },
+          "lambda_configuration": {
+            "timeout": 30,
+            "memory_size": 1024,
+            "package_type": "Image"
+          }
+        }
+        EOF
+        
+        echo "✅ Lambda deployment info created"
+        
     - name: Cleanup temporary files
       if: always()
       run: |
         echo "Cleaning up temporary files..."
-        rm -f *.txt *.csv *.pkl 2>/dev/null || true
+        rm -f *.txt *.csv *.pkl lambda-trust-policy.json /tmp/health_response.json /tmp/prediction_response.json 2>/dev/null || true
         echo "✅ Cleanup completed" 
