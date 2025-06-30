@@ -413,6 +413,17 @@ jobs:
         
         FUNCTION_NAME="churn-prediction-api"
         
+        # Create environment variables file
+        cat > lambda-env.json << EOF
+        {
+          "Variables": {
+            "AWS_DEFAULT_REGION": "${{ secrets.AWS_DEFAULT_REGION }}",
+            "MLFLOW_TRACKING_URI": "${{ secrets.MLFLOW_TRACKING_URI }}",
+            "MODEL_STAGE": "Production"
+          }
+        }
+        EOF
+        
         # Check if function already exists
         if aws lambda get-function --function-name $FUNCTION_NAME >/dev/null 2>&1; then
           echo "Updating existing Lambda function..."
@@ -425,7 +436,7 @@ jobs:
             --function-name $FUNCTION_NAME \
             --timeout 30 \
             --memory-size 1024 \
-            --environment Variables="{\"AWS_DEFAULT_REGION\":\"${{ secrets.AWS_DEFAULT_REGION }}\",\"MLFLOW_TRACKING_URI\":\"${{ secrets.MLFLOW_TRACKING_URI }}\",\"MODEL_STAGE\":\"Production\"}"
+            --environment file://lambda-env.json
             
           echo "✅ Lambda function updated successfully"
         else
@@ -434,6 +445,7 @@ jobs:
           # Wait a bit for the role to be available
           sleep 10
           
+          # Create function without environment variables first
           aws lambda create-function \
             --function-name $FUNCTION_NAME \
             --role ${{ env.LAMBDA_ROLE_ARN }} \
@@ -441,8 +453,16 @@ jobs:
             --package-type Image \
             --timeout 30 \
             --memory-size 1024 \
-            --environment Variables="{\"AWS_DEFAULT_REGION\":\"${{ secrets.AWS_DEFAULT_REGION }}\",\"MLFLOW_TRACKING_URI\":\"${{ secrets.MLFLOW_TRACKING_URI }}\",\"MODEL_STAGE\":\"Production\"}" \
             --description "Customer Churn Prediction API using MLflow model"
+            
+          # Wait for function to be active
+          echo "Waiting for Lambda function to be active..."
+          aws lambda wait function-active --function-name $FUNCTION_NAME
+          
+          # Update environment variables separately
+          aws lambda update-function-configuration \
+            --function-name $FUNCTION_NAME \
+            --environment file://lambda-env.json
             
           echo "✅ Lambda function created successfully"
         fi
@@ -641,5 +661,5 @@ jobs:
       if: always()
       run: |
         echo "Cleaning up temporary files..."
-        rm -f *.txt *.csv *.pkl lambda-trust-policy.json /tmp/health_response.json /tmp/prediction_response.json 2>/dev/null || true
+        rm -f *.txt *.csv *.pkl lambda-trust-policy.json lambda-env.json /tmp/health_response.json /tmp/prediction_response.json 2>/dev/null || true
         echo "✅ Cleanup completed" 
